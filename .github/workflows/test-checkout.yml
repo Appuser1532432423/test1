@@ -1,61 +1,49 @@
-name: Try actions/checkout Versions (v1-v7) and Log to Main Repo
+name: Checkout Version From PR Body and Log
 
 # pull_request_target runs with the base repo's context/token even for PRs
 # from forks. This workflow only writes a log file back to the main repo's
 # base branch — it never executes the fork's own code.
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize]
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: write   # needed to commit/push the log file back to the repo
 
 jobs:
-  try-checkout-versions:
+  checkout-detected-version:
     # remove this line if you want this to run for same-repo PRs too
     if: github.event.pull_request.head.repo.fork == true
     runs-on: ubuntu-latest
 
     steps:
-      # ---- Try each major version of actions/checkout itself ----
-      - name: Try actions/checkout@v1
-        id: checkout_v1
-        continue-on-error: true
-        uses: actions/checkout@v1
+      - name: Detect checkout@vN from PR body
+        id: detect
+        env:
+          # passed as an env var (not interpolated into the script) to avoid
+          # shell-injection from untrusted PR body text
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          VERSION=""
+          for i in 1 2 3 4 5 6 7; do
+            if echo "$PR_BODY" | grep -qiE "checkout@v${i}\b"; then
+              VERSION="v${i}"
+              break
+            fi
+          done
 
-      - name: Try actions/checkout@v2
-        id: checkout_v2
-        continue-on-error: true
-        uses: actions/checkout@v2
+          if [ -z "$VERSION" ]; then
+            echo "No checkout@vN (1-7) mention found in PR body. Defaulting to v4."
+            VERSION="v4"
+          fi
 
-      - name: Try actions/checkout@v3
-        id: checkout_v3
-        continue-on-error: true
-        uses: actions/checkout@v3
+          echo "Detected version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Try actions/checkout@v4
-        id: checkout_v4
-        continue-on-error: true
-        uses: actions/checkout@v4
-
-      - name: Try actions/checkout@v5
-        id: checkout_v5
-        continue-on-error: true
-        uses: actions/checkout@v5
-
-      - name: Try actions/checkout@v6
-        id: checkout_v6
-        continue-on-error: true
-        uses: actions/checkout@v6
-
-      - name: Try actions/checkout@v7
-        id: checkout_v7
-        continue-on-error: true
-        uses: actions/checkout@v7
 
       # ---- Re-checkout base branch cleanly so we can write/commit the log ----
       - name: Checkout base branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@${{ steps.detect.outputs.version }}
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
@@ -65,24 +53,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Build log from checkout version results
+      - name: Build log from checkout result
         id: build_log
         run: |
           mkdir -p logs
           LOGFILE="logs/checkout-version-log-pr${{ github.event.pull_request.number }}.txt"
 
           {
-            echo "actions/checkout version test log"
+            echo "Checkout version test log (from PR body)"
             echo "PR: #${{ github.event.pull_request.number }} (${{ github.event.pull_request.title }})"
             echo "Timestamp: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "Detected version: ${{ steps.detect.outputs.version }}"
             echo ""
-            echo "[${{ steps.checkout_v1.outcome }}] actions/checkout@v1"
-            echo "[${{ steps.checkout_v2.outcome }}] actions/checkout@v2"
-            echo "[${{ steps.checkout_v3.outcome }}] actions/checkout@v3"
-            echo "[${{ steps.checkout_v4.outcome }}] actions/checkout@v4"
-            echo "[${{ steps.checkout_v5.outcome }}] actions/checkout@v5"
-            echo "[${{ steps.checkout_v6.outcome }}] actions/checkout@v6"
-            echo "[${{ steps.checkout_v7.outcome }}] actions/checkout@v7"
+            echo "[${{ steps.checkout.outcome }}] actions/checkout@${{ steps.detect.outputs.version }}"
           } > "$LOGFILE"
 
           cat "$LOGFILE"
@@ -97,7 +80,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "chore: checkout version test log for PR #${{ github.event.pull_request.number }}"
+            git commit -m "chore: checkout version log for PR #${{ github.event.pull_request.number }}"
             git push origin "HEAD:$BASE_BRANCH"
           fi
 
