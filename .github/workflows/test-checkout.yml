@@ -1,7 +1,12 @@
 name: Test actions/checkout versions
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # manual run, normal test
+  pull_request_target:      # PR-based test (for v7's fork protection)
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read             # keep minimal — this is a test workflow, not a deploy
 
 jobs:
   test-checkout:
@@ -12,11 +17,89 @@ jobs:
       matrix:
         version: [v1, v2, v3, v4, v5, v6, v7]
     steps:
-      - name: Checkout ${{ matrix.version }}
+      - name: Checkout (${{ matrix.version }})
+        id: checkout
+        continue-on-error: true
         uses: actions/checkout@${{ matrix.version }}
+        with:
+          # only meaningful on pull_request_target; ignored/harmless on workflow_dispatch
+          ref: ${{ github.event_name == 'pull_request_target' && format('refs/pull/{0}/merge', github.event.pull_request.number) || '' }}
 
-      - name: Confirm it worked
+      - name: Verify repo content
+        id: verify
+        if: steps.checkout.outcome == 'success'
+        continue-on-error: true
         run: |
-          pwd
+          echo "Files in repo:"
           ls -la
           git log -1 --oneline
+
+      - name: Capture failure reason
+        id: capture
+        if: steps.checkout.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "Checkout step failed for ${{ matrix.version }}."
+          echo "See the 'Checkout (${{ matrix.version }})' step logs above for the exact error message."
+          echo "error=see-step-logs-above" >> "$GITHUB_OUTPUT"
+
+      - name: Record result
+        if: always()
+        run: |
+          mkdir -p results
+          if [ "${{ steps.checkout.outcome }}" == "success" ] && [ "${{ steps.verify.outcome }}" != "failure" ]; then
+            status="success"
+          else
+            status="failed"
+          fi
+          echo "${{ matrix.version }},$status,${{ github.event_name }}" > results/${{ matrix.version }}.csv
+          {
+            echo "### ${{ matrix.version }}: $status"
+            echo "- Trigger: ${{ github.event_name }}"
+            echo "- Checkout outcome: ${{ steps.checkout.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.version }}
+          path: results/${{ matrix.version }}.csv
+
+  # Optional: test v7's opt-in override, only makes sense on pull_request_target
+  test-v7-unsafe-opt-in:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout PR head (v7, allow-unsafe-pr-checkout)
+        uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          allow-unsafe-pr-checkout: true
+
+  report:
+    needs: test-checkout
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+
+      - name: Build summary table
+        run: |
+          {
+            echo "## actions/checkout version test results"
+            echo "| Version | Status | Trigger |"
+            echo "|---------|--------|---------|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for f in results/*.csv; do
+            version=$(cut -d, -f1 "$f")
+            status=$(cut -d, -f2 "$f")
+            trigger=$(cut -d, -f3 "$f")
+            echo "| $version | $status | $trigger |" >> "$GITHUB_STEP_SUMMARY"
+          done
