@@ -14,7 +14,6 @@ permissions:
 jobs:
   checkout-and-log:
     # remove this line if you want this to run for same-repo PRs too
-    if: github.event.pull_request.head.repo.fork == true
     runs-on: ubuntu-latest
 
     steps:
