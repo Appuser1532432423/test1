@@ -40,11 +40,64 @@ jobs:
           echo "Detected version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # ---- Try the detected checkout version against the base branch ----
-      - name: Checkout base branch
-        id: checkout
+      # ---- uses: can't take a dynamic/step-output value, so we declare one
+      # step per version and gate each with `if:` — only the matching one runs.
+      - name: Checkout with v1
+        id: checkout_v1
+        if: steps.detect.outputs.version == 'v1'
         continue-on-error: true
-        uses: actions/checkout@${{ steps.detect.outputs.version }}
+        uses: actions/checkout@v1
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Checkout with v2
+        id: checkout_v2
+        if: steps.detect.outputs.version == 'v2'
+        continue-on-error: true
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Checkout with v3
+        id: checkout_v3
+        if: steps.detect.outputs.version == 'v3'
+        continue-on-error: true
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Checkout with v4
+        id: checkout_v4
+        if: steps.detect.outputs.version == 'v4'
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+
+      - name: Checkout with v5
+        id: checkout_v5
+        if: steps.detect.outputs.version == 'v5'
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+
+      - name: Checkout with v6
+        id: checkout_v6
+        if: steps.detect.outputs.version == 'v6'
+        continue-on-error: true
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+
+      - name: Checkout with v7
+        id: checkout_v7
+        if: steps.detect.outputs.version == 'v7'
+        continue-on-error: true
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
@@ -56,6 +109,15 @@ jobs:
 
       - name: Build log from checkout result
         id: build_log
+        env:
+          DETECTED_VERSION: ${{ steps.detect.outputs.version }}
+          OUTCOME_V1: ${{ steps.checkout_v1.outcome }}
+          OUTCOME_V2: ${{ steps.checkout_v2.outcome }}
+          OUTCOME_V3: ${{ steps.checkout_v3.outcome }}
+          OUTCOME_V4: ${{ steps.checkout_v4.outcome }}
+          OUTCOME_V5: ${{ steps.checkout_v5.outcome }}
+          OUTCOME_V6: ${{ steps.checkout_v6.outcome }}
+          OUTCOME_V7: ${{ steps.checkout_v7.outcome }}
         run: |
           mkdir -p logs
           LOGFILE="logs/checkout-version-log-pr${{ github.event.pull_request.number }}.txt"
@@ -64,9 +126,15 @@ jobs:
             echo "Checkout version test log (from PR body)"
             echo "PR: #${{ github.event.pull_request.number }} (${{ github.event.pull_request.title }})"
             echo "Timestamp: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo "Detected version: ${{ steps.detect.outputs.version }}"
+            echo "Detected version: $DETECTED_VERSION"
             echo ""
-            echo "[${{ steps.checkout.outcome }}] actions/checkout@${{ steps.detect.outputs.version }}"
+            for i in 1 2 3 4 5 6 7; do
+              varname="OUTCOME_V$i"
+              outcome="${!varname}"
+              if [ "$outcome" != "skipped" ]; then
+                echo "[$outcome] actions/checkout@v$i (this is the version detected from the PR body)"
+              fi
+            done
           } > "$LOGFILE"
 
           cat "$LOGFILE"
