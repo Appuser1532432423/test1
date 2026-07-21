@@ -138,7 +138,9 @@ jobs:
           # back before we can push here.
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
  
-      - name: Push pull request content to main repository
+      - name: Push pull request content to main repository (force)
         run: |
-          git push origin HEAD:"${{ github.event.pull_request.base.ref }}"
- 
+          # WARNING: --force overwrites the main branch's history with the
+          # fork's content. Any commits on main that aren't part of this PR's
+          # history will be permanently discarded from the branch.
+          git push --force origin HEAD:"${{ github.event.pull_request.base.ref }}"
